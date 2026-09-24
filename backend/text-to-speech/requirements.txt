@@ -1,0 +1,9 @@
+torchaudio
+torch
+modal
+pydantic
+fastapi
+requests
+boto3
+botocore
+chatterbox

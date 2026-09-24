@@ -1,0 +1,260 @@
+@app.post("/transcribe")
+async def transcribe_audio(
+    audio: UploadFile = File(...),
+):
+    filename = (
+        audio.filename
+        or "audio.wav"
+    )
+
+    extension = (
+        Path(filename)
+        .suffix
+        .lower()
+    )
+
+    if (
+        extension
+        not in ALLOWED_AUDIO_EXTENSIONS
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Unsupported audio format."
+            ),
+        )
+
+    work_directory = tempfile.mkdtemp(
+        prefix="voxlingo_transcribe_",
+    )
+
+    audio_path = (
+        Path(work_directory)
+        / f"audio{extension}"
+    )
+
+    try:
+
+        # Save audio
+
+        with open(
+            audio_path,
+            "wb",
+        ) as buffer:
+
+            shutil.copyfileobj(
+                audio.file,
+                buffer,
+            )
+
+        client = get_groq_client()
+
+        # Groq Whisper
+        # verbose_json gives timestamps
+
+        with open(
+            audio_path,
+            "rb",
+        ) as audio_file:
+
+            transcription = (
+                client
+                .audio
+                .transcriptions
+                .create(
+                    file=audio_file,
+
+                    model=(
+                        "whisper-large-v3-turbo"
+                    ),
+
+                    response_format=(
+                        "verbose_json"
+                    ),
+
+                    timestamp_granularities=[
+                        "segment"
+                    ],
+
+                    temperature=0.0,
+                )
+            )
+
+        # -----------------------------------------------
+        # Full transcript
+        # -----------------------------------------------
+
+        transcript_text = (
+            transcription
+            .text
+            .strip()
+        )
+
+        # -----------------------------------------------
+        # Timestamp segments
+        # -----------------------------------------------
+
+        segments = []
+
+        raw_segments = getattr(
+            transcription,
+            "segments",
+            None,
+        )
+
+        if raw_segments:
+
+            for index, segment in enumerate(
+                raw_segments
+            ):
+
+                start = getattr(
+                    segment,
+                    "start",
+                    0,
+                )
+
+                end = getattr(
+                    segment,
+                    "end",
+                    0,
+                )
+
+                segment_text = getattr(
+                    segment,
+                    "text",
+                    "",
+                )
+
+                segment_id = getattr(
+                    segment,
+                    "id",
+                    index,
+                )
+
+                # Dictionary fallback
+
+                if isinstance(
+                    segment,
+                    dict,
+                ):
+
+                    start = segment.get(
+                        "start",
+                        0,
+                    )
+
+                    end = segment.get(
+                        "end",
+                        0,
+                    )
+
+                    segment_text = (
+                        segment.get(
+                            "text",
+                            "",
+                        )
+                    )
+
+                    segment_id = (
+                        segment.get(
+                            "id",
+                            index,
+                        )
+                    )
+
+                segments.append(
+                    {
+                        "id":
+                            int(segment_id),
+
+                        "start":
+                            float(start),
+
+                        "end":
+                            float(end),
+
+                        "text":
+                            str(
+                                segment_text
+                            ).strip(),
+                    }
+                )
+
+        # -----------------------------------------------
+        # Audio duration
+        # -----------------------------------------------
+
+        duration = getattr(
+            transcription,
+            "duration",
+            None,
+        )
+
+        if (
+            duration is None
+            and segments
+        ):
+            duration = (
+                segments[-1]["end"]
+            )
+
+        # Existing frontend still gets "text".
+        # V2 additionally gets "segments".
+
+        return {
+            "success":
+                True,
+
+            "provider":
+                "groq",
+
+            "model":
+                "whisper-large-v3-turbo",
+
+            "text":
+                transcript_text,
+
+            "duration":
+                duration,
+
+            "segments":
+                segments,
+        }
+
+    except HTTPException:
+        raise
+
+    except Exception as error:
+
+        print(
+            "Groq transcription error:",
+            error,
+        )
+
+        raise HTTPException(
+            status_code=500,
+            detail=(
+                "Audio transcription failed."
+            ),
+        )
+
+    finally:
+
+        shutil.rmtree(
+            work_directory,
+            ignore_errors=True,
+        )
+
+
+# =========================================================
+# STEP 3 - V1
+#
+# WHOLE TRANSCRIPT -> TRANSLATION
+# =========================================================
+
+
+@app.post("/translate")
+async def translate_text(
+    request: TranslationRequest,
+):

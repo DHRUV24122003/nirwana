@@ -209,7 +209,7 @@ Used to validate timing and rendering without consuming API credits.
 ## Project Structure
 
 ```text
-ai-voice-studio-app/
+nirwana/
 ├── frontend/
 │   ├── src/
 │   │   ├── actions/
@@ -237,8 +237,8 @@ ai-voice-studio-app/
 ### Clone the repository
 
 ```bash
-git clone <your-repository-url>
-cd ai-voice-studio-app
+git clone <repository-url>
+cd nirwana
 ```
 
 ### Frontend
